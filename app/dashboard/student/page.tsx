@@ -15,14 +15,18 @@ import {
   Image as ImageIcon,
   Feather,
   Info,
-  Calendar
+  Calendar,
+  Edit2,
+  X
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
 interface Article {
   id: string;
   title: string;
+  content: string;
   category: string;
+  cover_url: string | null;
   status: string;
   created_at: string;
   file_url: string | null;
@@ -51,6 +55,8 @@ export default function StudentDashboard() {
   // Upload progress states
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
+
+  const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -132,33 +138,85 @@ export default function StudentDashboard() {
     }
   };
 
-  const handleCreateArticle = async (e: React.FormEvent) => {
+  const startEditArticle = (art: Article) => {
+    setEditingArticleId(art.id);
+    setTitle(art.title);
+    setContent(art.content);
+    setCategory(art.category);
+    setCoverUrl(art.cover_url || "");
+    setFileUrl(art.file_url || "");
+    setFormSuccess(null);
+    setFormError(null);
+  };
+
+  const cancelEditArticle = () => {
+    setEditingArticleId(null);
+    setTitle("");
+    setContent("");
+    setCategory("Poesía");
+    setCoverUrl("");
+    setFileUrl("");
+    setFormSuccess(null);
+    setFormError(null);
+  };
+
+  const handleSubmitArticle = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setFormError(null);
     setFormSuccess(null);
 
-    if (!title || !content || !category) {
+    if (!title.trim() || !content.trim() || !category) {
       setFormError("Por favor completa los campos de Título, Categoría y Contenido de la obra.");
       setSubmitting(false);
       return;
     }
 
-    try {
-      const { data, error } = await supabase.from("articles").insert([
-        {
-          title,
-          content,
-          category,
-          cover_url: coverUrl || null,
-          file_url: fileUrl || null,
-          student_id: user.id,
-          student_name: profile?.full_name || "Estudiante",
-          status: "pendiente", // Submitted works start as pending moderation
-        },
-      ]).select();
+    if (!user || !profile) {
+      setFormError("No se pudo identificar tu sesión de usuario.");
+      setSubmitting(false);
+      return;
+    }
 
-      if (error) throw error;
+    try {
+      if (editingArticleId) {
+        // Mode: UPDATE
+        const { error } = await supabase
+          .from("articles")
+          .update({
+            title,
+            content,
+            category,
+            cover_url: coverUrl || null,
+            file_url: fileUrl || null,
+            status: "pendiente", // Reset status to pending when updated so teachers can review again
+          })
+          .eq("id", editingArticleId)
+          .eq("student_id", user.id);
+
+        if (error) throw error;
+
+        setFormSuccess("¡Obra actualizada con éxito! Ha sido enviada nuevamente para su revisión.");
+        setEditingArticleId(null);
+      } else {
+        // Mode: INSERT
+        const { error } = await supabase.from("articles").insert([
+          {
+            title,
+            content,
+            category,
+            cover_url: coverUrl || null,
+            file_url: fileUrl || null,
+            student_id: user.id,
+            student_name: profile?.full_name || "Estudiante",
+            status: "pendiente",
+          },
+        ]);
+
+        if (error) throw error;
+
+        setFormSuccess("¡Felicidades! Tu obra ha sido enviada al comité editorial (profesores) para su revisión.");
+      }
 
       // Celebrate success!
       confetti({
@@ -166,8 +224,6 @@ export default function StudentDashboard() {
         spread: 70,
         origin: { y: 0.6 }
       });
-
-      setFormSuccess("¡Felicidades! Tu obra ha sido enviada al comité editorial (profesores) para su revisión.");
 
       // Reset form
       setTitle("");
@@ -185,7 +241,7 @@ export default function StudentDashboard() {
 
     } catch (err: any) {
       console.error(err);
-      setFormError(err.message || "Error al enviar el trabajo.");
+      setFormError(err.message || "Error al procesar la obra.");
     } finally {
       setSubmitting(false);
     }
@@ -302,7 +358,7 @@ export default function StudentDashboard() {
                         </td>
                         <td>{getStatusBadge(art.status)}</td>
                         <td>
-                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                             {art.status === "aprobado" ? (
                               <a
                                 href={`/articles/${art.id}`}
@@ -313,14 +369,25 @@ export default function StudentDashboard() {
                                 Leer en Revista
                               </a>
                             ) : (
-                              <a
-                                href={`/articles/${art.id}`}
-                                className="btn btn-secondary"
-                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.2rem" }}
-                              >
-                                <ExternalLink size={12} />
-                                Vista Previa
-                              </a>
+                              <>
+                                <a
+                                  href={`/articles/${art.id}`}
+                                  className="btn btn-secondary"
+                                  style={{ padding: "0.3rem 0.6rem", fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.2rem" }}
+                                >
+                                  <ExternalLink size={12} />
+                                  Vista Previa
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => startEditArticle(art)}
+                                  className="btn btn-primary"
+                                  style={{ padding: "0.3rem 0.6rem", fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.2rem", backgroundColor: "var(--accent)" }}
+                                >
+                                  <Edit2 size={12} />
+                                  Editar
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
@@ -344,8 +411,12 @@ export default function StudentDashboard() {
               }}
             >
               <h2 className="literary-title" style={{ fontSize: "1.4rem", marginBottom: "1.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <Plus size={20} style={{ color: "var(--primary)" }} />
-                Nueva Obra Editorial
+                {editingArticleId ? (
+                  <Edit2 size={20} style={{ color: "var(--accent)" }} />
+                ) : (
+                  <Plus size={20} style={{ color: "var(--primary)" }} />
+                )}
+                {editingArticleId ? "Editar Obra" : "Nueva Obra Editorial"}
               </h2>
 
               {formError && (
@@ -362,7 +433,7 @@ export default function StudentDashboard() {
                 </div>
               )}
 
-              <form onSubmit={handleCreateArticle} style={{ display: "flex", flexDirection: "column", gap: "1.2rem" }}>
+              <form onSubmit={handleSubmitArticle} style={{ display: "flex", flexDirection: "column", gap: "1.2rem" }}>
 
                 <div className="form-group">
                   <label className="form-label" htmlFor="artTitle">Título de la Obra</label>
@@ -610,14 +681,29 @@ export default function StudentDashboard() {
                   )}
                 </div>
 
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ width: "100%", marginTop: "1rem", height: "45px" }}
-                  disabled={submitting || uploadingDoc || uploadingCover}
-                >
-                  {submitting ? "Enviando..." : "Enviar a Moderación"}
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginTop: "1rem" }}>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ width: "100%", height: "45px" }}
+                    disabled={submitting || uploadingDoc || uploadingCover}
+                  >
+                    {submitting
+                      ? (editingArticleId ? "Guardando..." : "Enviando...")
+                      : (editingArticleId ? "Guardar Cambios" : "Enviar a Moderación")}
+                  </button>
+                  {editingArticleId && (
+                    <button
+                      type="button"
+                      onClick={cancelEditArticle}
+                      className="btn btn-secondary"
+                      style={{ width: "100%", height: "40px", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}
+                      disabled={submitting}
+                    >
+                      <X size={14} /> Cancelar Edición
+                    </button>
+                  )}
+                </div>
               </form>
             </div>
           </div>
